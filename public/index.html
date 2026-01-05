@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Jarvis</title>
+</head>
+<body>
+  <h1>Jarvis Online</h1>
+  <p>Say “hey jarvis”</p>
+
+  <script>
+    let listeningForCommand = false;
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = async (event) => {
+      const transcript =
+        event.results[event.results.length - 1][0].transcript.trim();
+
+      if (transcript.toLowerCase().includes("hey jarvis")) {
+        speak("Yes?");
+        listeningForCommand = true;
+        return;
+      }
+
+      if (!listeningForCommand) return;
+      listeningForCommand = false;
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: transcript })
+      });
+
+      const data = await res.json();
+      speak(data.reply);
+    };
+
+    recognition.onend = () => recognition.start();
+    recognition.start();
+
+    function speak(text) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.9;
+      u.pitch = 0.8;
+      speechSynthesis.speak(u);
+    }
+  </script>
+</body>
+</html>
