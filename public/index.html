@@ -1,123 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Jarvis</title>
-  <style>
-    body { font-family: sans-serif; padding: 20px; background: #111; color: #eee; }
-    h1 { color: #0ff; }
-    #status { font-weight: bold; margin-bottom: 10px; }
-    #user, #ai { border: 1px solid #333; padding: 10px; margin: 5px 0; border-radius: 5px; }
-    #user { background: #222; color: #0f0; }
-    #ai { background: #222; color: #0ff; }
-  </style>
+<meta charset="UTF-8">
+<title>Jarvis</title>
+<style>
+  body { font-family: sans-serif; background:#111; color:#eee; padding:20px; }
+  h1 { color:#0ff; }
+  #status { font-weight:bold; margin-bottom:10px; }
+  #user,#ai { border:1px solid #333; padding:10px; margin:5px 0; border-radius:5px; }
+  #user { background:#222; color:#0f0; }
+  #ai { background:#222; color:#0ff; }
+</style>
 </head>
 <body>
-  <h1>Jarvis Online</h1>
-  <p id="status">🎙️ Listening…</p>
+<h1>Jarvis Online</h1>
+<p id="status">🎙️ Listening…</p>
+<div id="user">You said:</div>
+<div id="ai">Jarvis says:</div>
 
-  <div id="user">You said: </div>
-  <div id="ai">Jarvis says: </div>
+<script>
+let listeningForCommand = false;
+let busy = false;
+let lastTrigger = 0;
+const COOLDOWN_MS = 5000;
 
-  <script>
-    let listeningForCommand = false;
-    let busy = false;
-    let lastTrigger = 0;
-    const COOLDOWN_MS = 5000;
+const statusEl = document.getElementById("status");
+const userEl = document.getElementById("user");
+const aiEl = document.getElementById("ai");
 
-    const statusEl = document.getElementById("status");
-    const userEl = document.getElementById("user");
-    const aiEl = document.getElementById("ai");
+function setStatus(text) { statusEl.textContent = text; }
 
-    function setStatus(text) { statusEl.textContent = text; }
+function beep() {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = 880;
+  osc.connect(ctx.destination);
+  osc.start();
+  setTimeout(()=>osc.stop(),120);
+}
 
-    function beep() {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = 880;
-      osc.connect(ctx.destination);
-      osc.start();
-      setTimeout(() => osc.stop(), 120);
-    }
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if(!SpeechRecognition){ setStatus("❌ SpeechRecognition not supported"); throw new Error("Unsupported"); }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new SpeechRecognition();
+recognition.continuous = true;
+recognition.interimResults = true;
+recognition.lang = "en-US";
 
-    if (!SpeechRecognition) {
-      setStatus("❌ Speech recognition not supported");
-      throw new Error("SpeechRecognition unsupported");
-    }
+recognition.onresult = async (event)=>{
+  const lastResult = event.results[event.results.length-1];
+  if(!lastResult.isFinal) return; // only handle final transcripts
+  const transcript = lastResult[0].transcript.trim();
+  userEl.textContent = "You said: "+transcript;
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true; // show partial results
-    recognition.lang = "en-US";
+  // wake word detection
+  if(transcript.toLowerCase().includes("hey jarvis")){
+    beep();
+    setStatus("🟢 Wake word detected!");
+    listeningForCommand = true;
+    speak("Yes?");
+    return;
+  }
 
-    recognition.onresult = async (event) => {
-      const transcript =
-        Array.from(event.results)
-          .map(r => r[0].transcript)
-          .join('')
-          .trim();
+  if(!listeningForCommand || busy) return;
+  const now = Date.now();
+  if(now - lastTrigger < COOLDOWN_MS) return;
 
-      userEl.textContent = "You said: " + transcript;
+  busy = true;
+  listeningForCommand = false;
+  lastTrigger = now;
+  setStatus("⏳ Thinking…");
 
-      // Wake word detection
-      if (transcript.toLowerCase().includes("hey jarvis")) {
-        beep();
-        setStatus("🟢 Wake word detected!");
-        listeningForCommand = true;
-        speak("Yes?");
-        return;
-      }
+  try{
+    // call serverless function instead of exposing API key
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: transcript })
+    });
+    const data = await res.json();
+    const reply = data.reply || "Jarvis ready.";
+    aiEl.textContent = "Jarvis says: "+reply;
+    setStatus("🗣️ Speaking…");
+    speak(reply);
+  }catch(err){
+    console.error(err);
+    setStatus("❌ AI error");
+  }finally{
+    busy=false;
+  }
+};
 
-      if (!listeningForCommand || busy) return;
+recognition.onerror=(e)=>{
+  console.error(e);
+  setStatus("⚠️ Mic error, restarting…");
+};
 
-      const now = Date.now();
-      if (now - lastTrigger < COOLDOWN_MS) return;
+recognition.onend=()=>{
+  setStatus("🎙️ Listening…");
+  recognition.start();
+};
 
-      busy = true;
-      listeningForCommand = false;
-      lastTrigger = now;
-      setStatus("⏳ Thinking…");
+recognition.start();
 
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: transcript })
-        });
-        const data = await res.json();
-        aiEl.textContent = "Jarvis says: " + data.reply;
-        setStatus("🗣️ Speaking…");
-        speak(data.reply);
-      } catch (err) {
-        console.error(err);
-        setStatus("❌ Jarvis error");
-      } finally {
-        busy = false;
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.error(e);
-      setStatus("⚠️ Mic error, restarting…");
-    };
-
-    recognition.onend = () => {
-      setStatus("🎙️ Listening…");
-      recognition.start();
-    };
-
-    recognition.start();
-
-    function speak(text) {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 0.9;
-      utter.pitch = 0.8;
-      utter.onend = () => setStatus("🎙️ Listening…");
-      speechSynthesis.speak(utter);
-    }
-  </script>
+function speak(text){
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate=0.9;
+  u.pitch=0.8;
+  u.onend=()=>setStatus("🎙️ Listening…");
+  speechSynthesis.speak(u);
+}
+</script>
 </body>
 </html>
